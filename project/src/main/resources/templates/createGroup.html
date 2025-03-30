@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yeni Grup Oluştur</title>
+    <style>/* Genel stil ayarları */
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        margin: 0;
+        padding: 0;
+    }
+
+    .form-container {
+        max-width: 600px;
+        margin: 50px auto;
+        padding: 20px;
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    h2 {
+        text-align: center;
+        margin-bottom: 20px;
+    }
+
+    form {
+        display: flex;
+        flex-direction: column;
+    }
+
+    label {
+        margin-bottom: 8px;
+        font-weight: bold;
+    }
+
+    input[type="text"],
+    button {
+        padding: 10px;
+        margin-bottom: 15px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+
+    button {
+        background-color: #007bff;
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+        background-color: #0056b3;
+    }
+
+    h3 {
+        margin-top: 20px;
+        margin-bottom: 10px;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 15px;
+    }
+
+    table th,
+    table td {
+        padding: 10px;
+        text-align: left;
+        border-bottom: 1px solid #ccc;
+    }
+
+    table th {
+        background-color: #f9f9f9;
+    }
+
+    input[type="checkbox"] {
+        margin: 0;
+    }</style>
+    <script>
+        let host = window.location.hostname;
+        function fetchUsers() {
+            fetch(`https://${host}:8443/api/users`) // API çağrısı
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP hata durumu: ${response.status}`);
+                    }
+                    return response.json(); // Yanıtı JSON'a dönüştür
+                })
+                .then(data => {
+                    // API yanıtında 'users' anahtarını kontrol et
+                    const users = data.users;
+                    if (!Array.isArray(users)) {
+                        throw new TypeError('API beklenen bir dizi (Array) döndürmedi');
+                    }
+
+                    const userTable = document.getElementById("userTable");
+                    userTable.innerHTML = ""; // Tabloyu temizle
+
+                    users.forEach(user => {
+                        // Yeni bir satır oluştur
+                        const row = document.createElement('tr');
+
+                        // Hücreler oluştur
+                        const cell1 = document.createElement('td');
+                        const cell2 = document.createElement('td');
+                        const cell3 = document.createElement('td');
+                        const checkbox = document.createElement('input');
+
+                        // Checkbox özelliklerini ayarla
+                        checkbox.type = "checkbox";
+                        checkbox.name = "participants";
+                        checkbox.value = user.username; // Kullanıcı adını checkbox değerine ata
+
+                        // Hücrelere verileri ekle
+                        cell1.textContent = user.id;
+                        cell2.textContent = user.username;
+                        cell3.appendChild(checkbox);
+
+                        // Satıra hücreleri ekle
+                        row.appendChild(cell1);
+                        row.appendChild(cell2);
+                        row.appendChild(cell3);
+
+                        // Tabloya satırı ekle
+                        userTable.appendChild(row);
+                    });
+                })
+                .catch(error => console.error('Kullanıcılar alınırken hata:', error)); // Hata yakalama
+        }
+
+        function createGroup() {
+            const groupName = document.getElementById("groupName").value;
+            const selectedUsers = Array.from(document.querySelectorAll('input[name="participants"]:checked'))
+                .map(input => input.value);
+
+            if (groupName && selectedUsers.length > 0) {
+                const token = localStorage.getItem('token');
+                const groupData = {
+                    name: groupName,
+                    kullanıcılar: selectedUsers // Liste olarak gönderiliyor
+                };
+
+                fetch(`https://${host}:8443/api/groups/new`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(groupData)
+                })
+                    .then(response => {
+                        if (response.ok) {
+                            alert("Yeni grup başarıyla oluşturuldu!");
+                            window.location.href = `https://${host}:8443/group/page`; // Ana sayfaya yönlendir
+                        } else {
+                            alert("Grup oluşturulurken bir hata oluştu.");
+                        }
+                    })
+                    .catch(error => console.error('Grup oluşturulurken hata:', error));
+            } else {
+                alert("Lütfen grup adı ve en az bir katılımcı seçin.");
+            }
+        }
+
+
+        window.onload = function() {
+            fetchUsers();
+        };
+
+    </script>
+</head>
+<body>
+<div class="form-container">
+    <h2>Yeni Grup Oluştur</h2>
+    <form onsubmit="event.preventDefault(); createGroup();">
+        <label for="groupName">Grup Adı:</label>
+        <input type="text" id="groupName" name="groupName" required>
+
+        <h3>Kullanıcılar</h3>
+        <table id="userTable">
+            <tr>
+                <th>ID</th>
+                <th>Kullanıcı Adı</th>
+                <th>Seç</th>
+            </tr>
+        </table>
+
+        <button type="submit">Oluştur</button>
+    </form>
+</div>
+</body>
+</html>

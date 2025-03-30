@@ -1,0 +1,293 @@
+<!--<!DOCTYPE html>-->
+<!--<html lang="tr">-->
+<!--<head>-->
+<!--  <meta charset="UTF-8">-->
+<!--  <meta name="viewport" content="width=device-width, initial-scale=1.0">-->
+<!--  <title>Grup Mesajlaşması</title>-->
+<!--  <link rel="stylesheet" href="styles.css">-->
+<!--  <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>-->
+<!--  <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>-->
+<!--  <style>-->
+<!--    body {-->
+<!--      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;-->
+<!--      margin: 0;-->
+<!--      padding: 0;-->
+<!--      display: flex;-->
+<!--      height: 100vh;-->
+<!--      background-color: #f9f9f9;-->
+<!--      color: #333;-->
+<!--    }-->
+
+<!--    .group-list {-->
+<!--      width: 22%;-->
+<!--      background-color: #fbfbfb;-->
+<!--      border-right: 1px solid #e0e0e0;-->
+<!--      padding: 20px;-->
+<!--      overflow-y: auto;-->
+<!--      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);-->
+<!--      border-radius: 0 10px 10px 0;-->
+<!--    }-->
+
+<!--    .group-list h3 {-->
+<!--      font-size: 18px;-->
+<!--      font-weight: bold;-->
+<!--      margin-bottom: 15px;-->
+<!--      text-align: center;-->
+<!--      color: #555;-->
+<!--    }-->
+
+<!--    .group-list button {-->
+<!--      display: block;-->
+<!--      width: 100%;-->
+<!--      margin: 10px 0;-->
+<!--      padding: 12px;-->
+<!--      background-color: #ffffff;-->
+<!--      border: 1px solid #ddd;-->
+<!--      border-radius: 8px;-->
+<!--      text-align: center;-->
+<!--      cursor: pointer;-->
+<!--      font-size: 16px;-->
+<!--      transition: all 0.3s ease;-->
+<!--      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);-->
+<!--    }-->
+
+<!--    .group-list button:hover {-->
+<!--      background-color: #e0f7e7;-->
+<!--      border-color: #80d0a3;-->
+<!--      color: #008c4a;-->
+<!--      transform: translateY(-2px);-->
+<!--      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);-->
+<!--    }-->
+
+<!--    .chat-content {-->
+<!--      width: 78%;-->
+<!--      display: flex;-->
+<!--      flex-direction: column;-->
+<!--      background-color: #ffffff;-->
+<!--      padding: 10px;-->
+<!--      box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);-->
+<!--    }-->
+
+<!--    .message-area {-->
+<!--      flex: 1;-->
+<!--      padding: 15px;-->
+<!--      overflow-y: auto;-->
+<!--      background-color: #fdfdfd;-->
+<!--      display: flex;-->
+<!--      flex-direction: column;-->
+<!--      gap: 10px;-->
+<!--    }-->
+
+<!--    .message-area li {-->
+<!--      max-width: 70%;-->
+<!--      padding: 10px 15px;-->
+<!--      border-radius: 15px;-->
+<!--      list-style: none;-->
+<!--      word-wrap: break-word;-->
+<!--      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);-->
+<!--      line-height: 1.4;-->
+<!--    }-->
+
+<!--    /* Bizden giden mesajlar */-->
+<!--    .message-area .own-message {-->
+<!--      align-self: flex-end;-->
+<!--      background-color: #f8f9fa; /* Süt beyazı */-->
+<!--      color: #333;-->
+<!--      text-align: right;-->
+<!--      border: 1px solid #ddd;-->
+<!--    }-->
+
+<!--    /* Diğer kullanıcılardan gelen mesajlar */-->
+<!--    .message-area .other-message {-->
+<!--      align-self: flex-start;-->
+<!--      background-color: #c8e6c9; /* Kullanıcılardaki yeşil tonu */-->
+<!--      color: #155724; /* Kontrastlı yeşil */-->
+<!--      text-align: left;-->
+<!--      border: 1px solid #a5d6a7; /* Kenar çizgisi */-->
+<!--    }-->
+
+<!--    .chat-input {-->
+<!--      display: flex;-->
+<!--      padding: 15px;-->
+<!--      background-color: #fbfbfb;-->
+<!--      border-top: 1px solid #e0e0e0;-->
+<!--      box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.05);-->
+<!--    }-->
+
+<!--    .chat-input input {-->
+<!--      flex: 1;-->
+<!--      padding: 12px;-->
+<!--      border: 1px solid #ddd;-->
+<!--      border-radius: 8px;-->
+<!--      margin-right: 10px;-->
+<!--      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);-->
+<!--    }-->
+
+<!--    .chat-input input:focus {-->
+<!--      outline: none;-->
+<!--      border-color: #007bff;-->
+<!--    }-->
+
+<!--    .chat-input button {-->
+<!--      padding: 12px 20px;-->
+<!--      border: none;-->
+<!--      background-color: #4caf50; /* Kullanıcıların üzerine geldiği yeşil */-->
+<!--      color: white;-->
+<!--      border-radius: 8px;-->
+<!--      cursor: pointer;-->
+<!--      font-size: 16px;-->
+<!--      transition: background-color 0.3s ease;-->
+<!--      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);-->
+<!--    }-->
+
+<!--    .chat-input button:hover {-->
+<!--      background-color: #388e3c; /* Daha koyu yeşil */-->
+<!--    }-->
+
+<!--    .chat-input button:active {-->
+<!--      transform: translateY(2px);-->
+<!--    }-->
+<!--  </style>-->
+<!--  <script>-->
+<!--    let stompClient = null;-->
+<!--    let currentGroup = null; // Şu anda katılınan grup-->
+<!--    let username = '';-->
+<!--    let host = window.location.hostname;-->
+
+<!--    function getUsernameFromToken(token) {-->
+<!--      if (!token) return null;-->
+
+<!--      const payloadBase64 = token.split('.')[1];-->
+<!--      if (!payloadBase64) return null;-->
+
+<!--      try {-->
+<!--        const payload = JSON.parse(atob(payloadBase64));-->
+<!--        return payload.sub || payload.username || null;-->
+<!--      } catch (error) {-->
+<!--        console.error("Token çözme hatası:", error);-->
+<!--        return null;-->
+<!--      }-->
+<!--    }-->
+
+<!--    function connect() {-->
+<!--      const token = localStorage.getItem('token');-->
+<!--      if (!token) {-->
+<!--        alert("Yetkilendirme hatası: Lütfen giriş yapın.");-->
+<!--        return;-->
+<!--      }-->
+
+<!--      username = getUsernameFromToken(token);-->
+<!--      if (!username) {-->
+<!--        alert("Kullanıcı adı alınamadı: Lütfen tekrar giriş yapın.");-->
+<!--        return;-->
+<!--      }-->
+
+<!--      const socket = new SockJS(`http://${host}:8443/ws`);-->
+<!--      stompClient = Stomp.over(socket);-->
+
+<!--      stompClient.connect({ Authorization: `Bearer ${token}` }, function (frame) {-->
+<!--        console.log('Bağlandı: ' + frame);-->
+<!--        fetchGroups();-->
+<!--      }, function (error) {-->
+<!--        console.error('Bağlantı hatası:', error);-->
+<!--        alert("WebSocket bağlantısı başarısız oldu.");-->
+<!--      });-->
+<!--    }-->
+
+<!--    function fetchGroups() {-->
+<!--      fetch(`https://${host}:8443/api/groups/${username}`)-->
+<!--              .then(response => response.json())-->
+<!--              .then(groups => {-->
+<!--                const groupArea = document.getElementById("groupArea");-->
+<!--                groupArea.innerHTML = ""; // Önceki listeyi temizle-->
+<!--                groups.forEach(group => {-->
+<!--                  const groupButton = document.createElement('button');-->
+<!--                  groupButton.textContent = group.name;-->
+<!--                  groupButton.addEventListener('click', () => joinGroup(group.name));-->
+<!--                  groupArea.appendChild(groupButton);-->
+<!--                });-->
+
+<!--                // Grup oluştur butonu-->
+<!--                const createGroupButton = document.createElement('button');-->
+<!--                createGroupButton.textContent = 'Grup Oluştur';-->
+<!--                createGroupButton.addEventListener('click', () => window.location.href = (`https://${host}:8443/group/creta`));-->
+<!--                groupArea.appendChild(createGroupButton);-->
+<!--              })-->
+<!--              .catch(error => console.error('Gruplar alınırken hata:', error));-->
+<!--    }-->
+
+<!--    function joinGroup(groupName) {-->
+<!--      if (currentGroup) {-->
+<!--        stompClient.unsubscribe(`/topic/${currentGroup}`);-->
+<!--      }-->
+
+<!--      currentGroup = groupName;-->
+<!--      const messageArea = document.getElementById("messageArea");-->
+<!--      messageArea.innerHTML = ""; // Önceki mesajları temizle-->
+
+<!--      // Grubun geçmiş mesajlarını çek-->
+<!--      fetch(`https://${host}:8443/group/${groupName}/messages`)-->
+<!--              .then(response => response.json())-->
+<!--              .then(messages => {-->
+<!--                messages.forEach(message => showMessage(message));-->
+<!--              })-->
+<!--              .catch(error => console.error('Grup mesajları alınırken hata:', error));-->
+
+<!--      // Grubun mesaj kanalına abone ol-->
+<!--      stompClient.subscribe(`/topic/${groupName}`, function (message) {-->
+<!--        showMessage(JSON.parse(message.body));-->
+<!--      });-->
+<!--    }-->
+
+<!--    function sendMessage() {-->
+<!--      const messageContent = document.getElementById("message").value;-->
+<!--      if (messageContent && currentGroup) {-->
+<!--        const message = {-->
+<!--          groupname: currentGroup,-->
+<!--          sender: username,-->
+<!--          content: messageContent-->
+<!--        };-->
+
+<!--        stompClient.send(`/app/chat.sendGroupMessage`, {}, JSON.stringify(message));-->
+<!--        document.getElementById("message").value = "";-->
+<!--        showMessage(message);-->
+<!--      } else {-->
+<!--        alert("Lütfen bir grup seçin ve bir mesaj yazın.");-->
+<!--      }-->
+<!--    }-->
+
+<!--    function showMessage(message) {-->
+<!--      const messageArea = document.getElementById("messageArea");-->
+<!--      const messageElement = document.createElement('li');-->
+
+<!--      if (message.sender === username) {-->
+<!--        messageElement.textContent = `Sen: ${message.content}`;-->
+<!--        messageElement.style.textAlign = 'right';-->
+<!--      } else {-->
+<!--        messageElement.textContent = `${message.sender}: ${message.content}`;-->
+<!--        messageElement.style.textAlign = 'left';-->
+<!--      }-->
+
+<!--      messageArea.appendChild(messageElement);-->
+<!--      messageArea.scrollTop = messageArea.scrollHeight;-->
+<!--    }-->
+
+<!--    window.onload = function () {-->
+<!--      connect();-->
+<!--    };-->
+<!--  </script>-->
+
+<!--</head>-->
+<!--<body>-->
+<!--<div class="group-list" id="groupArea">-->
+<!--  <h3>Gruplar</h3>-->
+<!--</div>-->
+<!--<div class="chat-content">-->
+<!--  <ul id="messageArea" class="message-area"></ul>-->
+<!--  <div class="chat-input">-->
+<!--    <input type="text" id="message" placeholder="Mesajınızı yazın..." />-->
+<!--    <button onclick="sendMessage()">Gönder</button>-->
+<!--  </div>-->
+<!--</div>-->
+<!--</body>-->
+<!--</html>-->

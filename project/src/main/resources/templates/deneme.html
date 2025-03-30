@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Voice Call</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        table {
+            width: 50%;
+            border-collapse: collapse;
+            margin: 20px auto;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        #callButton, #endButton, #acceptButton, #rejectButton {
+            margin: 10px;
+        }
+        #callStatus {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+<h1 style="text-align: center;">Kullanıcı Listesi</h1>
+<table>
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Kullanıcı Adı</th>
+        <th>İşlem</th>
+    </tr>
+    </thead>
+    <tbody id="userTable">
+    </tbody>
+</table>
+
+<h2 style="text-align: center;">WebRTC Voice Call</h2>
+<div>
+    <label for="callerUsername">Caller Username: </label>
+    <input type="text" id="callerUsername" disabled>
+</div>
+<div>
+    <label for="receiverUsername">Receiver Username: </label>
+    <input type="text" id="receiverUsername" disabled>
+</div>
+<button id="callButton" onclick="startCall()" disabled>Start Call</button>
+<button id="acceptButton" onclick="acceptCall()" style="display: none;">Accept</button>
+<button id="rejectButton" onclick="rejectCall()" style="display: none;">Reject</button>
+<button id="endButton" onclick="endCall()" style="display: none;">End Call</button>
+<div id="callStatus"></div>
+
+<script>
+    let host = window.location.hostname;
+    let stompClient = null;
+    let localConnection = null;
+    let remoteConnection = null;
+    let localStream = null;
+    let incomingCall = null;
+    const peerConnectionConfig = {
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    };
+    let loggedInUsername = null;
+
+    let selectedReceiver = null;
+    let selectedReceiverId = null;
+
+    function getUsernameFromToken(token) {
+        if (!token) return null;
+        const payloadBase64 = token.split('.')[1];
+        try {
+            const payload = JSON.parse(atob(payloadBase64));
+            return payload.sub || payload.username || payload.email || null;
+        } catch {
+            return null;
+        }
+    }
+
+    function getUserIdFromToken(token) {
+        if (!token) return null;
+        const payloadBase64 = token.split('.')[1];
+        try {
+            const payload = JSON.parse(atob(payloadBase64));
+            return payload.userId || payload.sub;
+        } catch {
+            return null;
+        }
+    }
+
+    // Token'den userId'yi alıyoruz
+    const token = localStorage.getItem('token');
+    const userId = getUserIdFromToken(token);
+
+    function connect() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            alert("Yetkilendirme hatası: Lütfen giriş yapın.");
+            window.location.href = '/login';
+            return;
+        }
+
+        loggedInUsername = getUsernameFromToken(token);
+        if (!loggedInUsername) {
+            alert("Kullanıcı adı alınamadı: Lütfen tekrar giriş yapın.");
+            window.location.href = '/login';
+            return;
+        }
+
+        document.getElementById("callerUsername").value = loggedInUsername;
+
+        const socket = new SockJS(`https://${host}:8443/ws`);
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect({ Authorization: `Bearer ${token}` }, function () {
+            console.log("WebSocket bağlantısı kuruldu.");
+
+            // Kullanıcının özel kanalına abone ol
+            stompClient.subscribe(`/user/${loggedInUsername}/queue/call`, message => {
+                const incomingMessage = JSON.parse(message.body);
+                console.log("Gelen mesaj:", incomingMessage);
+
+                if (incomingMessage.type === "offer") {
+                    document.getElementById("callStatus").innerText = `${incomingMessage.callerUsername} sizi arıyor...`;
+                    incomingCall = incomingMessage;
+                    showCallActions(true); // Kabul ve reddet butonlarını göster
+                    document.getElementById("endButton").style.display = "inline-block"; // Sonlandırma butonunu göster
+                } else if (incomingMessage.type === "answer") {
+                    console.log("Cevap sinyali alındı:", incomingMessage);
+                    if (localConnection) {
+                        localConnection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: incomingMessage.sdp }));
+                    }
+                    document.getElementById("endButton").style.display = "inline-block"; // Sonlandırma butonunu göster
+                } else if (incomingMessage.type === "ice-candidate") {
+                    console.log("ICE Candidate alındı:", incomingMessage);
+                    const candidate = new RTCIceCandidate({
+                        candidate: incomingMessage.candidate,
+                        sdpMid: incomingMessage.sdpMid,
+                        sdpMLineIndex: incomingMessage.sdpMLineIndex
+                    });
+                    if (localConnection) {
+                        localConnection.addIceCandidate(candidate)
+                            .then(() => console.log("ICE Candidate eklendi."))
+                            .catch(error => console.error("ICE Candidate eklenirken hata oluştu:", error));
+                    }
+                } else if (incomingMessage.type === "end-call") {
+                    document.getElementById("callStatus").innerText = "Çağrı sona erdi.";
+                    resetCallUI(); // Arayüzü sıfırla
+                }
+            });
+
+            console.log(`Abonelik kuruldu: /user/${loggedInUsername}/queue/call`);
+            fetchUserList(token);
+        });
+    }
+
+    function fetchUserList(token) {
+        fetch(`https://${host}:8443/api/users`, {
+            headers: { Authorization: `Bearer ${token}` }
+        })
+            .then(res => res.json())
+            .then(data => populateUserTable(data.users))
+            .catch(console.error);
+    }
+
+    console.log("userId:", userId);
+    console.log("selectedReceiverId:", selectedReceiverId);
+
+    function prepareCallData(type, additionalData = {}) {
+        return {
+            id: new Date().getTime(),
+            callerId: loggedInUsername, // Çağrıyı başlatan kullanıcı
+            receiverId: additionalData.receiverId || null, // Alıcı ID
+            callerUsername: loggedInUsername,
+            receiverUsername: additionalData.receiverUsername || null, // Alıcı username
+            type: type, // "offer", "answer", "ice-candidate", vb.
+            timestamp: new Date().toISOString(),
+            sdp: additionalData.sdp || null,
+            candidate: additionalData.candidate || null,
+            sdpMid: additionalData.sdpMid || null,
+            sdpMLineIndex: additionalData.sdpMLineIndex || null,
+            callStatus: additionalData.callStatus || "ONGOING",
+            ...additionalData // Ek veri
+        };
+    }
+
+    function sendSignal(callData, username, endpoint = '/app/call/signal') {
+        if (!callData || !callData.receiverId || !callData.receiverUsername || !callData.type) {
+            console.error("Eksik sinyal bilgisi:", callData);
+            return;
+        }
+
+        if (!username) {
+            console.error("Eksik kullanıcı bilgisi:", username);
+            return;
+        }
+
+        // Kullanıcıya özel sinyal gönder
+        stompClient.send(`/user/${username}/queue/call`, {}, JSON.stringify(callData));
+        console.log(`Sinyal ${username} kullanıcısına gönderildi:`, callData);
+
+        // Sunucuya genel sinyal gönder
+        stompClient.send(endpoint, {}, JSON.stringify(callData));
+        console.log(`Sinyal sunucuya gönderildi:`, callData);
+    }
+
+    // Kullanıcıyı aramak için çağrıyı başlatma
+    function initiateCall(receiverUsername, receiverId) {
+        selectedReceiver = receiverUsername || null;
+        selectedReceiverId = receiverId || null;
+        document.getElementById("receiverUsername").value = receiverUsername || '';
+        document.getElementById("callButton").disabled = false;
+    }
+
+    // Çağrı başlatma fonksiyonu
+    function startCall() {
+        const receiver = selectedReceiver || 'Unknown';
+        const receiverId = selectedReceiverId || 'Unknown';
+
+        localConnection = new RTCPeerConnection(peerConnectionConfig);
+
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            localStream = stream;
+
+            // Yerel ses akışını bağlantıya ekle
+            localStream.getTracks().forEach(track => localConnection.addTrack(track, localStream));
+
+            return localConnection.createOffer().then(offer => {
+                return localConnection.setLocalDescription(offer).then(() => {
+                    const callData = prepareCallData("offer", {
+                        sdp: localConnection.localDescription.sdp,
+                        receiverId: receiverId,
+                        receiverUsername: receiver
+                    });
+
+                    if (callData) {
+                        sendSignal(callData, receiver);
+                        console.log(`Sinyal ${callData.receiverUsername} kullanıcısına gönderildi:`, callData);
+                        document.getElementById("callStatus").innerText = `Çağrı ${receiver} kullanıcısına gönderildi.`;
+                        document.getElementById("endButton").style.display = "inline-block"; // Sonlandırma butonunu göster
+                        document.getElementById("endButton").disabled = false; // Sonlandırma butonunu aktif et
+                    }
+                });
+            });
+        }).catch(error => {
+            console.error("Çağrı başlatılırken hata oluştu:", error);
+            alert("Ses cihazlarına erişim hatası: " + error.message);
+        });
+
+        // ICE Candidate gönderimi
+        localConnection.onicecandidate = event => {
+            if (event.candidate) {
+                const candidateData = prepareCallData("ice-candidate", {
+                    candidate: event.candidate.candidate,
+                    sdpMid: event.candidate.sdpMid,
+                    sdpMLineIndex: event.candidate.sdpMLineIndex,
+                    receiverId: receiverId,
+                    receiverUsername: receiver
+                });
+                if (candidateData) {
+                    sendSignal(candidateData, receiver);
+                    console.log(`ICE Candidate sinyali ${candidateData.receiverUsername} kullanıcısına gönderildi:`, candidateData);
+                }
+            }
+        };
+
+        // Remote stream handling
+        localConnection.ontrack = event => {
+            const remoteAudio = document.createElement('audio');
+            remoteAudio.srcObject = event.streams[0];
+            remoteAudio.autoplay = true;
+            document.body.appendChild(remoteAudio);
+        };
+    }
+
+    // Çağrıyı kabul etme fonksiyonu
+    let callStartTime = null;
+
+    function acceptCall() {
+        if (!incomingCall) {
+            console.error("Gelen çağrı yok.");
+            return;
+        }
+
+        remoteConnection = new RTCPeerConnection(peerConnectionConfig);
+
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            localStream = stream;
+
+            // Yerel ses akışını bağlantıya ekle
+            localStream.getTracks().forEach(track => remoteConnection.addTrack(track, localStream));
+
+            remoteConnection.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: incomingCall.sdp })).then(() => {
+                return remoteConnection.createAnswer().then(answer => {
+                    return remoteConnection.setLocalDescription(answer).then(() => {
+                        const answerData = prepareCallData("answer", {
+                            sdp: remoteConnection.localDescription.sdp,
+                            receiverId: incomingCall.callerId,
+                            receiverUsername: incomingCall.callerUsername
+                        });
+
+                        if (answerData) {
+                            sendSignal(answerData, incomingCall.callerUsername, '/app/call/accept');
+                            console.log(`Sinyal ${answerData.receiverUsername} kullanıcısına gönderildi:`, answerData);
+                            document.getElementById("callStatus").innerText = `Çağrı kabul edildi.`;
+                            document.getElementById("endButton").style.display = "inline-block"; // Sonlandırma butonunu göster
+                            callStartTime = new Date();
+                        }
+                    });
+                });
+            });
+        }).catch(error => {
+            console.error("Çağrı kabul edilirken hata oluştu:", error);
+            alert("Ses cihazlarına erişim hatası: " + error.message);
+        });
+
+        // ICE Candidate gönderimi
+        remoteConnection.onicecandidate = event => {
+            if (event.candidate) {
+                const candidateData = prepareCallData("ice-candidate", {
+                    candidate: event.candidate.candidate,
+                    sdpMid: event.candidate.sdpMid,
+                    sdpMLineIndex: event.candidate.sdpMLineIndex,
+                    receiverId: incomingCall.callerId,
+                    receiverUsername: incomingCall.callerUsername
+                });
+                if (candidateData) {
+                    sendSignal(candidateData, incomingCall.callerUsername, '/app/call/start');
+                    console.log(`ICE Candidate sinyali ${candidateData.receiverUsername} kullanıcısına gönderildi:`, candidateData);
+                }
+            }
+        };
+
+        // Remote stream handling
+        remoteConnection.ontrack = event => {
+            const remoteAudio = document.createElement('audio');
+            remoteAudio.srcObject = event.streams[0];
+            remoteAudio.autoplay = true;
+            document.body.appendChild(remoteAudio);
+        };
+    }
+
+    // Çağrıyı sonlandırma fonksiyonu
+    function endCall() {
+        let endCallData = null;
+
+        if (incomingCall) {
+            endCallData = {
+                id: new Date().getTime(),
+                callerId: incomingCall.callerId,
+                receiverId: userId,
+                callerUsername: incomingCall.callerUsername,
+                receiverUsername: loggedInUsername,
+                type: "end-call",
+                timestamp: new Date().toISOString(),
+                callStatus: "ENDED",
+                duration: callStartTime ? ((new Date() - callStartTime) / 1000) : 0
+            };
+        } else if (selectedReceiver && selectedReceiverId) {
+            endCallData = {
+                id: new Date().getTime(),
+                callerId: loggedInUsername,
+                receiverId: selectedReceiverId,
+                callerUsername: loggedInUsername,
+                receiverUsername: selectedReceiver,
+                type: "end-call",
+                timestamp: new Date().toISOString(),
+                callStatus: "ENDED",
+                duration: callStartTime ? ((new Date() - callStartTime) / 1000) : 0
+            };
+        } else {
+            console.error("Alıcı bilgileri eksik! Lütfen geçerli bir kullanıcı seçin.");
+            return;
+        }
+
+        if (localConnection) {
+            localConnection.close();
+            localConnection = null;
+        }
+
+        if (remoteConnection) {
+            remoteConnection.close();
+            remoteConnection = null;
+        }
+
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            localStream = null;
+        }
+
+        if (endCallData) {
+            sendSignal(endCallData, endCallData.receiverUsername, '/app/call/end');
+            console.log("Çağrı sona erdi ve sinyal gönderildi.");
+        }
+
+        document.getElementById("callStatus").innerText = "Çağrı sona erdi.";
+        resetCallUI();
+    }
+
+    // Çağrıyı reddetme fonksiyonu
+    function rejectCall() {
+        if (!incomingCall) {
+            console.error("Geçersiz çağrı bilgisi: Gelen çağrı eksik!");
+            return;
+        }
+
+        console.log("Gelen çağrı bilgisi reddediliyor:", incomingCall);
+
+        const rejectData = {
+            id: new Date().getTime(),
+            callerId: incomingCall.callerId,
+            receiverId: userId,
+            callerUsername: incomingCall.callerUsername,
+            receiverUsername: loggedInUsername,
+            type: "reject-call",
+            timestamp: new Date().toISOString(),
+            callStatus: "REJECTED"
+        };
+
+        if (rejectData) {
+            sendSignal(rejectData, incomingCall.callerUsername, '/app/call/reject');
+            console.log("Çağrı reddedildi ve sinyal gönderildi.");
+            resetCallUI();
+        }
+    }
+
+    function populateUserTable(users) {
+        const userTable = document.getElementById('userTable');
+        userTable.innerHTML = '';
+        users.forEach(user => {
+            if (user.username !== loggedInUsername) {
+                const row = document.createElement('tr');
+                row.innerHTML =
+                    `<td>${user.id}</td>
+                     <td>${user.username}</td>
+                     <td><button onclick="initiateCall('${user.username}', '${user.id}')">Ara</button></td>`;
+                userTable.appendChild(row);
+            }
+        });
+    }
+
+    function showCallActions(show) {
+        document.getElementById("acceptButton").style.display = show ? "inline-block" : "none";
+        document.getElementById("rejectButton").style.display = show ? "inline-block" : "none";
+    }
+
+    function resetCallUI() {
+        showCallActions(false);
+        document.getElementById("callButton").disabled = false;
+        document.getElementById("endButton").style.display = "none";
+        document.getElementById("endButton").disabled = true;
+        document.getElementById("callStatus").innerText = "";
+        selectedReceiver = null;
+        selectedReceiverId = null;
+    }
+
+    connect();
+</script>
+</body>
+</html>

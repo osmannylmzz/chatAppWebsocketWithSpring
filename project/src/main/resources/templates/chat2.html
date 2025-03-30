@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerçek Zamanlı Sohbet</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      height: 100vh;
+      background-color: #f4f4f4;
+      overflow: hidden;
+    }
+
+    .user-list {
+      width: 25%;
+      background-color: #2c3e50;
+      color: white;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      border-right: 1px solid #ccc;
+      overflow-y: auto;
+    }
+
+    .user-list h3 {
+      margin-bottom: 20px;
+      font-size: 22px;
+      color: #ecf0f1;
+    }
+
+    .user-list button {
+      width: 90%;
+      padding: 10px;
+      margin: 5px 0;
+      background-color: #34495e;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background-color 0.3s ease;
+    }
+
+    .user-list button:hover {
+      background-color: #1abc9c;
+    }
+
+    #logoutButton {
+      margin-top: auto;
+      width: 90%;
+      padding: 10px;
+      background-color: #e74c3c;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background-color 0.3s ease;
+    }
+
+    #logoutButton:hover {
+      background-color: #c0392b;
+    }
+
+    .chat-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background-color: #ecf0f1;
+    }
+
+    .message-area {
+      flex: 1;
+      padding: 15px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background-color: #ffffff;
+      border-bottom: 1px solid #ccc;
+    }
+
+    .message-area li {
+      max-width: 70%;
+      padding: 10px 15px;
+      background-color: #f1f1f1;
+      border-radius: 10px;
+      list-style: none;
+      word-wrap: break-word;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .message-area .own-message {
+      align-self: flex-end;
+      background-color: #3498db;
+      color: white;
+    }
+
+    .message-area .other-message {
+      align-self: flex-start;
+      background-color: #ecf0f1;
+      color: black;
+    }
+
+    .chat-input {
+      display: flex;
+      padding: 15px;
+      background-color: #bdc3c7;
+      border-top: 1px solid #ccc;
+    }
+
+    .chat-input input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+
+    .chat-input input:focus {
+      outline: none;
+      border-color: #3498db;
+    }
+
+    .chat-input button {
+      padding: 10px 20px;
+      background-color: #3498db;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-left: 10px;
+      transition: background-color 0.3s ease;
+    }
+
+    .chat-input button:hover {
+      background-color: #2980b9;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+</head>
+<body>
+<div class="user-list" id="userArea">
+  <h3>Kullanıcılar</h3>
+  <button id="logoutButton">Çıkış Yap</button>
+</div>
+<div class="chat-content">
+  <ul id="messageArea" class="message-area"></ul>
+  <div class="chat-input">
+    <input type="text" id="message" placeholder="Mesajınızı yazın..." />
+    <button onclick="sendMessage()">Gönder</button>
+  </div>
+</div>
+
+<script>
+  let stompClient = null;
+  let username = '';
+  let userId = null;
+  let receiver = null;
+  let receiverId = null;
+  let host = window.location.hostname;
+
+  function getUsernameFromToken(token) {
+    if (!token) return null;
+    const payloadBase64 = token.split('.')[1];
+    if (!payloadBase64) return null;
+
+    try {
+      const payload = JSON.parse(atob(payloadBase64));
+      return payload.sub || payload.username || null;
+    } catch (error) {
+      console.error("Token çözme hatası:", error);
+      return null;
+    }
+  }
+
+  function connect() {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert("Yetkilendirme hatası: Lütfen giriş yapın.");
+      return;
+    }
+
+    username = getUsernameFromToken(token);
+    if (!username) {
+      alert("Kullanıcı adı alınamadı: Lütfen tekrar giriş yapın.");
+      return;
+    }
+
+    fetch(`https://${host}:8443/api/users`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+            .then(response => response.json())
+            .then(data => {
+              const userArea = document.getElementById('userArea');
+              data.users.forEach(user => {
+                if (user.username === username) {
+                  userId = user.id;
+                } else {
+                  const userButton = document.createElement('button');
+                  userButton.textContent = user.username;
+                  userButton.addEventListener('click', function () {
+                    setReceiver(user);
+                  });
+                  userButton.dataset.id = user.id;
+                  userArea.appendChild(userButton);
+                }
+              });
+            })
+            .catch(error => {
+              console.error('Kullanıcılar alınamadı:', error);
+              alert("Kullanıcılar yüklenirken bir hata oluştu.");
+            });
+
+    const socket = new SockJS(`https://${host}:8443/ws`);
+    stompClient = Stomp.over(socket);
+
+    stompClient.connect({}, function (frame) {
+      console.log('Bağlandı: ' + frame);
+
+      stompClient.subscribe('/user/' + username + '/queue/reply', function (message) {
+        const messageData = JSON.parse(message.body);
+        showMessage(messageData);
+       markAsSeen(messageData.id);
+      });
+    });
+  }
+
+  document.getElementById('logoutButton').addEventListener('click', function () {
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+
+    if (stompClient) {
+      stompClient.disconnect(() => console.log('WebSocket bağlantısı kesildi.'));
+    }
+
+    window.location.href = `https://${host}:8443/api/login`;
+  });
+
+  function sendMessage() {
+    const messageContent = document.getElementById("message").value;
+    if (messageContent && username && receiver) {
+      const message = prepareMessage(messageContent);
+    stompClient.send('/app/chat', {}, JSON.stringify(message));
+      // Mesajı sadece alıcıya gönder
+  //    stompClient.send('/user/' + receiver + '/queue/reply', {}, JSON.stringify(message));
+
+      document.getElementById("message").value = "";
+
+      // Gönderilen mesajı hemen ekranda göster
+      showMessage(message);
+    } else {
+      alert("Lütfen bir mesaj yazın ve bir alıcı seçin.");
+    }
+  }
+
+  function prepareMessage(messageContent) {
+    return {
+      id: `${new Date().getTime()}-${Math.random().toString(36).substr(2, 9)}`,
+      senderId: userId,
+      receiverId: receiverId,
+      sender: username,
+      receiver: receiver,
+      message: messageContent,
+      date: new Date().toISOString(),
+      read: false,
+      readTimestamp: null,
+    };
+  }
+
+  function markAsSeen(messageId) {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error("Token bulunamadı.");
+      return;
+    }
+
+    fetch(`https://${host}:8443/api/messages/${messageId}/seen`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+    })
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+              }
+              return response.json();
+            })
+            .then(data => {
+              console.log("Mesaj görüldü olarak işaretlendi:", data);
+            })
+            .catch(error => {
+              console.error('Görüldü işareti gönderilirken hata:', error);
+            });
+  }
+  function setReceiver(user) {
+    receiver = user.username;
+    receiverId = user.id;
+
+    fetch(`https://${host}:8443/messages/${username}/${receiver}`)
+            .then(response => response.json())
+            .then(data => {
+              if (Array.isArray(data)) {
+                data.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                document.getElementById("messageArea").innerHTML = "";
+                data.forEach(message => showMessage(message));
+              } else {
+                console.error("Beklenen formatta veri alınamadı:", data);
+                alert("Mesajlar yüklenirken bir hata oluştu.");
+              }
+            })
+            .catch(error => {
+              console.error('Mesajlar çekilirken hata:', error);
+              alert("Mesajlar yüklenirken bir hata oluştu.");
+            });
+  }
+
+  function showMessage(message) {
+    const messageArea = document.getElementById("messageArea");
+    const messageElement = document.createElement('li');
+
+    const timestamp = new Date(message.date).toLocaleString("tr-TR", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+
+    if (message.sender === username) {
+      messageElement.textContent = `Sen (${timestamp}): ${message.message}`;
+      messageElement.className = 'own-message';
+    } else {
+      messageElement.textContent = `${message.sender} (${timestamp}): ${message.message}`;
+      messageElement.className = 'other-message';
+    }
+
+    messageArea.appendChild(messageElement);
+    messageArea.scrollTop = messageArea.scrollHeight;
+  }
+
+  window.onload = function () {
+    connect();
+  };
+</script>
+</body>
+</html>
