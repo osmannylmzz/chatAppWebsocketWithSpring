@@ -10,6 +10,7 @@ Proje, AWS EC2 üzerinde canlı olarak yayınlanmıştır.
 ✅ WebRTC ile sesli arama
 ✅ MongoDB ile mesaj geçmişi
 ✅ AWS EC2 üzerinde yayınlama
+✅ Mysql ile kullanıcı bilgileri tutma
 
 🔊 Sesli Arama Özelliği (WebRTC)
 Kullanıcılar birebir görüşmelerde anlık sesli arama başlatabilir.
@@ -41,4 +42,7 @@ Authentication	Spring Security + JWT
 Real-Time Messaging	WebSocket + STOMP
 Sesli Arama	WebRTC + ICE/STUN/TURN
 Deployment	AWS EC2 (Ubuntu 22.04)
+Mysql 
+
+Uygulama içi detaylı görüntüleri screenshots klasöründe paylaştım.
 
